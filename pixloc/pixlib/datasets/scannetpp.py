@@ -49,6 +49,7 @@ class ScanNet(BaseDataset):
         'val_num_per_scene': None,
         'test_num_per_scene': None,
         'multi_room_num_per_scene': None,
+        'multi_room_v2_num_per_scene': None,
 
         'num_views': 5,
         'init_layout': None,
@@ -107,7 +108,7 @@ class _Dataset(torch.utils.data.Dataset):
             self.image_tuples = json.load(f)
 
         if conf.flatten:
-            assert split == 'multi_room'
+            assert 'multi_room' in split
             self.image_tuples = flatten_image_tuples(self.image_tuples)
 
         scenes_with_files = set(s.split(':')[0] for s in self.scenes)
@@ -252,7 +253,7 @@ class _Dataset(torch.utils.data.Dataset):
             data.append(self._read_view(scene.split(':')[0], name, layout_gt, seed))
         data = collate(data)
 
-        if self.split == 'multi_room':  # Ground truth is either cuboid or mesh
+        if 'multi_room' in self.split:  # Ground truth is either cuboid or mesh
             if layout_gt is not None:
                 verts, faces = layout_gt.corners, layout_gt.faces
             else:
@@ -279,7 +280,7 @@ class _Dataset(torch.utils.data.Dataset):
         scene = image_tuple['scene']
         seed = self.conf.seed + idx
 
-        if self.split == 'multi_room' and not self.conf.flatten:
+        if 'multi_room' in self.split and not self.conf.flatten:
             data = []
             for room, image_list in image_tuple['images'].items():
                 data.append(self._read_room(scene, room, image_list, seed))
