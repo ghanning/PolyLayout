@@ -44,6 +44,8 @@ class ScanNet(BaseDataset):
         'pointcloud_subpath': 'data/{}/scans/mesh_aligned_0.05.ply',
         'info_dir': 'scannetpp_polylayout_training/',
         'read_info_files': False,
+        'pose_dir': None,
+        'pose_file': '{:04d}.json',
 
         'train_num_per_scene': None,
         'val_num_per_scene': None,
@@ -177,7 +179,7 @@ class _Dataset(torch.utils.data.Dataset):
             self.renderer_cache[worker_id] = EdgeRenderer(width, height)
         return self.renderer_cache[worker_id]
 
-    def _read_view(self, scene, image_name, layout_gt, seed):
+    def _read_view(self, scene, image_name, layout_gt, seed, T=None):
         image_dir = self.root / self.conf.image_subpath.format(scene)
         image_path = image_dir / image_name
 
@@ -188,9 +190,10 @@ class _Dataset(torch.utils.data.Dataset):
             dict(model='PINHOLE', width=width, height=height, params=params)
         )
 
-        frame = self.frames[scene][image_name]
-        R, t = nerfstudio_to_colmap(np.array(frame['transform_matrix']))
-        T = Pose.from_Rt(R, t)
+        if T is None:
+            frame = self.frames[scene][image_name]
+            R, t = nerfstudio_to_colmap(np.array(frame['transform_matrix']))
+            T = Pose.from_Rt(R, t)
 
         if self.conf.read_info_files:
             idx = self.name2idx[scene][image_name]
@@ -234,7 +237,7 @@ class _Dataset(torch.utils.data.Dataset):
 
         return data
 
-    def _read_room(self, scene: str, room: Optional[str], image_list: List[str], seed: int):
+    def _read_room(self, scene: str, room: Optional[str], image_list: List[str], seed: int, room_idx: int | None = None):
         layout = self.layouts[scene]
         if room is not None:
             layout = layout[room]
@@ -248,9 +251,19 @@ class _Dataset(torch.utils.data.Dataset):
         else:  # Ground truth mesh
             layout_gt = None
 
+        if self.conf.pose_dir is not None:
+            pose_path = self.conf.pose_dir / self.conf.pose_file.format(room_idx)
+            with open(pose_path) as f:
+                poses = json.load(f)
+
         data = []
-        for name in image_list[:self.conf.num_views]:
-            data.append(self._read_view(scene.split(':')[0], name, layout_gt, seed))
+        for idx, name in enumerate(image_list[:self.conf.num_views]):
+            if self.conf.pose_dir is not None:
+                R, t = np.array(poses[idx]["R"]), np.array(poses[idx]["t"])
+                T = Pose.from_Rt(R, t)
+            else:
+                T = None
+            data.append(self._read_view(scene.split(':')[0], name, layout_gt, seed, T=T))
         data = collate(data)
 
         if 'multi_room' in self.split:  # Ground truth is either cuboid or mesh
@@ -281,9 +294,14 @@ class _Dataset(torch.utils.data.Dataset):
         seed = self.conf.seed + idx
 
         if 'multi_room' in self.split and not self.conf.flatten:
+            flat_idx = 0  # Flat index for the room
+            for i in range(idx):
+                flat_idx += len(self.image_tuples[i]['images'].keys())
+
             data = []
             for room, image_list in image_tuple['images'].items():
-                data.append(self._read_room(scene, room, image_list, seed))
+                data.append(self._read_room(scene, room, image_list, seed, room_idx=flat_idx))
+                flat_idx += 1
 
             R = R_from_cams(torch.cat([d['T_w2cam'] for d in data]), seed)
             for d in data:
