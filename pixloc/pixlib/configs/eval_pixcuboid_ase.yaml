@@ -1,0 +1,38 @@
+data:
+  name: ase
+  num_views: 10
+  rotate: true
+  grayscale: false
+  resize: 512
+  init_layout: cuboid_cameras
+  flatten: true
+  batch_size: 6
+  num_workers: 8
+  seed: 1
+  read_line_segments: true
+model:
+  name: cuboid_refiner
+  success_thresh: 3
+  duplicate_optimizer_per_scale: true
+  point_sampling: guided
+  num_points2D: 256
+  pre_optimize_vp: true
+  extractor:
+    name: dual_decoder_unet
+    encoder: resnet101
+    weights: IMAGENET1K_V2
+    decoder: [64, 64, 64, 32]
+    output_scales: [0, 2, 4]
+    output_dim: [32, 128, 128]
+    compute_uncertainty: true
+    compute_edge_map: true
+    compute_edge_uncertainty: true
+    checkpointed: true
+  optimizer:
+    name: cuboid_optimizer
+    num_iters: 15
+    loss_fn: scaled_barron(0, 0.1)
+    edge_cost_scale: 0.05
+    vp_cost_scale: 40.0
+    vp_dist_thr: 0.05
+    clamp_dd: 0.25

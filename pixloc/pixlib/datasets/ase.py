@@ -59,6 +59,8 @@ def mesh_to_polygon(verts: np.ndarray) -> Polygon:
 class ASE(BaseDataset):
     default_conf = {
         'dataset_dir': 'ase/',
+        'pose_dir': None,
+        'pose_file': '{:04d}.json',
 
         'num_views': 5,
         'init_layout': None,
@@ -125,10 +127,11 @@ class _Dataset(torch.utils.data.Dataset):
         if conf.flatten:
             self.image_tuples = flatten_image_tuples(self.image_tuples)
 
-    def _read_view(self, scene_dir: Path, image_name: str, trajectory: np.ndarray, seed: int):
-        traj_idx = int(image_name[8:15])  # "vignette0000043.jpg"
-        T_w2d = Pose.from_4x4mat(trajectory[traj_idx].inverse().to_matrix())
-        T_w2c = self.T_d2c @ T_w2d
+    def _read_view(self, scene_dir: Path, image_name: str, trajectory: np.ndarray, seed: int, T_w2c=None):
+        if T_w2c is None:
+            traj_idx = int(image_name[8:15])  # "vignette0000043.jpg"
+            T_w2d = Pose.from_4x4mat(trajectory[traj_idx].inverse().to_matrix())
+            T_w2c = self.T_d2c @ T_w2d
 
         image_dir = scene_dir / 'rgb_undistorted'
         image_path = image_dir / image_name
@@ -149,12 +152,25 @@ class _Dataset(torch.utils.data.Dataset):
 
         return data
 
-    def _read_room(self, scene: str, room: str, image_list: List[str], trajectory: np.ndarray, seed: int):
+    def _read_room(self, scene: str, room: str, image_list: List[str], trajectory: np.ndarray, seed: int, room_idx: int | None = None):
         scene_dir = self.root / scene
 
+        if self.conf.pose_dir is not None:
+            pose_path = Path(self.conf.pose_dir) / self.conf.pose_file.format(room_idx)
+            with open(pose_path) as f:
+                poses = json.load(f)
+
         data = []
-        for image in image_list[:self.conf.num_views]:
-            data.append(self._read_view(scene_dir, image, trajectory, seed))
+        for idx, image in enumerate(image_list[:self.conf.num_views]):
+            if self.conf.pose_dir is not None:
+                R, t = np.array(poses[idx]["R"]), np.array(poses[idx]["t"])
+                if self.conf.rotate:
+                    Rz = Rotation.from_euler("z", 90, degrees=True).as_matrix()
+                    R, t = Rz @ R, Rz @ t
+                T_w2c = Pose.from_Rt(R, t)
+            else:
+                T_w2c = None
+            data.append(self._read_view(scene_dir, image, trajectory, seed, T_w2c=T_w2c))
         data = collate(data)
 
         layout_gt = self.layouts[scene][room]
@@ -175,12 +191,17 @@ class _Dataset(torch.utils.data.Dataset):
 
         if self.conf.flatten:
             room = image_tuple['room']
-            data = self._read_room(scene, room, image_tuple['images'], trajectory, seed)
+            data = self._read_room(scene, room, image_tuple['images'], trajectory, seed, room_idx=idx)
             data['layout_init'] = sample_layout(self.conf, data['T_w2cam'], seed).float()
         else:
+            flat_idx = 0  # Flat index for the room
+            for i in range(idx):
+                flat_idx += len(self.image_tuples[i]['images'].keys())
+
             data = []
             for room, image_list in image_tuple['images'].items():
-                data.append(self._read_room(scene, room, image_list, trajectory, seed))
+                data.append(self._read_room(scene, room, image_list, trajectory, seed, room_idx=flat_idx))
+                flat_idx += 1
 
             R = R_from_cams(torch.cat([d['T_w2cam'] for d in data]), seed)
             for d in data:
