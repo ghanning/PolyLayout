@@ -252,7 +252,7 @@ class _Dataset(torch.utils.data.Dataset):
             layout_gt = None
 
         if self.conf.pose_dir is not None:
-            pose_path = self.conf.pose_dir / self.conf.pose_file.format(room_idx)
+            pose_path = Path(self.conf.pose_dir) / self.conf.pose_file.format(room_idx)
             with open(pose_path) as f:
                 poses = json.load(f)
 
