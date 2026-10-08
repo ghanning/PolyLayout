@@ -312,7 +312,7 @@ class _Dataset(torch.utils.data.Dataset):
             data = collate(data)
         else:
             room = image_tuple.get('room', None)
-            data = self._read_room(scene, room, image_tuple['images'], seed)
+            data = self._read_room(scene, room, image_tuple['images'], seed, room_idx=idx)
             data['layout_init'] = sample_layout(
                 self.conf, data['T_w2cam'], seed, layout_gt=data.get('layout_gt')).float()
             if self.split == 'train':  # Train on polygons, even if ground truth is cuboid
